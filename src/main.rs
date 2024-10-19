@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{self, Write},
+    io::{self, Error, ErrorKind, Write},
 };
 
 fn main() {
@@ -41,29 +41,14 @@ const ADD_SYNTAX_ERR_TEXT: &str =
     "syntax error: expected Add <employee> to <department>, e.g. Add David to IT";
 
 fn execute_add_query(deps_to_empls: &mut HashMap<String, Vec<String>>, parts: Vec<String>) {
-    let mut employee: String = "".to_string();
-    let mut department: String = "".to_string();
-    match parts.get(1) {
-        None => println!("{}", ADD_SYNTAX_ERR_TEXT),
-        Some(val) => {
-            employee = val.to_string();
-            match parts.get(2) {
-                None => println!("{}", ADD_SYNTAX_ERR_TEXT),
-                Some(val) => match val.as_str() {
-                    "to" => match parts.get(3) {
-                        None => println!("{}", ADD_SYNTAX_ERR_TEXT),
-                        Some(val) => department = val.to_string(),
-                    },
-                    _ => println!("{}", ADD_SYNTAX_ERR_TEXT),
-                },
-            }
+    match parse_query_params(parts, "to", ADD_SYNTAX_ERR_TEXT) {
+        Err(error) => println!("{}", error),
+        Ok(dep_empl_pair) => {
+            deps_to_empls
+                .entry(dep_empl_pair.department)
+                .or_default()
+                .push(dep_empl_pair.employee);
         }
-    }
-    if !employee.is_empty() && !department.is_empty() {
-        deps_to_empls
-            .entry(department)
-            .or_insert(Vec::new())
-            .push(employee);
     }
 }
 
@@ -71,30 +56,47 @@ const GET_SYNTAX_ERR_TEXT: &str =
     "syntax error: expected Get <employee> from <department>, e.g. Get David from IT or Get * from IT";
 
 fn execute_get_query(deps_to_empls: &mut HashMap<String, Vec<String>>, parts: Vec<String>) {
-    let mut employee: String = "".to_string();
-    let mut department: String = "".to_string();
+    match parse_query_params(parts, "from", GET_SYNTAX_ERR_TEXT) {
+        Ok(dep_empl_pair) => {
+            let result = filter_out_departments(deps_to_empls, &dep_empl_pair.department);
+            let result = filter_out_employees(&result, &dep_empl_pair.employee);
+            show_data(&result);
+        }
+        Err(err) => println!("{}", err),
+    }
+}
 
+struct DepartmentEmployeePair {
+    department: String,
+    employee: String,
+}
+
+fn parse_query_params(
+    parts: Vec<String>,
+    delim: &str,
+    error_text: &str,
+) -> Result<DepartmentEmployeePair, io::Error> {
     match parts.get(1) {
-        None => println!("{}", GET_SYNTAX_ERR_TEXT),
+        None => Err(Error::new(ErrorKind::Other, error_text)),
         Some(val) => {
-            employee = val.to_string();
+            let employee = val.to_string();
             match parts.get(2) {
-                None => println!("{}", GET_SYNTAX_ERR_TEXT),
-                Some(val) => match val.as_str() {
-                    "from" => match parts.get(3) {
-                        None => println!("{}", GET_SYNTAX_ERR_TEXT),
-                        Some(val) => department = val.to_string(),
-                    },
-                    _ => println!("{}", GET_SYNTAX_ERR_TEXT),
-                },
+                None => Err(Error::new(ErrorKind::Other, error_text)),
+                Some(val) => {
+                    if val.as_str() == delim {
+                        match parts.get(3) {
+                            None => Err(Error::new(ErrorKind::Other, error_text)),
+                            Some(val) => Ok(DepartmentEmployeePair {
+                                department: val.to_string(),
+                                employee,
+                            }),
+                        }
+                    } else {
+                        Err(Error::new(ErrorKind::Other, error_text))
+                    }
+                }
             }
         }
-    }
-
-    if !employee.is_empty() && !department.is_empty() {
-        let result = filter_out_departments(deps_to_empls, &department);
-        let result = filter_out_employees(&result, &employee);
-        show_data(&result);
     }
 }
 
@@ -134,7 +136,7 @@ fn filter_out_employees(
             if employee == employee_pattern {
                 result
                     .entry(department.clone())
-                    .or_insert(Vec::new())
+                    .or_default()
                     .push(employee.to_string());
             }
         }
